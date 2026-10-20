@@ -1,0 +1,99 @@
+{
+  "enabled": {
+    "description": "启用插件",
+    "hint": "关闭后不再拦截任何模型请求",
+    "type": "bool",
+    "default": true
+  },
+  "timezone": {
+    "description": "时区",
+    "hint": "IANA 时区名，如 Asia/Shanghai",
+    "type": "string",
+    "default": "Asia/Shanghai"
+  },
+  "peak_action": {
+    "description": "高峰动作",
+    "hint": "pause：拦截对话，不发请求；switch：改用下方指定的便宜模型继续对话",
+    "type": "string",
+    "options": ["pause", "switch"],
+    "labels": ["暂停对话（拦截）", "切换模型"],
+    "default": "pause"
+  },
+  "peak_provider_id": {
+    "description": "高峰期使用的模型提供商",
+    "hint": "仅「切换模型」模式生效；留空或提供商不存在时会跳过切换并记录日志",
+    "type": "string",
+    "default": "",
+    "_special": "select_provider"
+  },
+  "affected_providers": {
+    "description": "受影响的模型供应商",
+    "hint": "逗号分隔的匹配词，匹配 Provider 的 ID/模型名/类型；* = 全部；留空 = 不拦截/不切换",
+    "type": "string",
+    "default": "*"
+  },
+  "gate_when_provider_unknown": {
+    "description": "识别不到供应商时仍处理",
+    "type": "bool",
+    "default": true
+  },
+  "peak_windows": {
+    "description": "高峰时段（命中则执行高峰动作）",
+    "hint": "支持跨夜，如 22:00-06:00；开始=结束视为全天。指令以唤醒前缀开头，不受影响。",
+    "type": "template_list",
+    "templates": {
+      "peak_window": {
+        "name": "高峰时段",
+        "display_item": "start",
+        "items": {
+          "days": {
+            "description": "生效星期",
+            "type": "list",
+            "default": ["1", "2", "3", "4", "5"],
+            "options": ["1", "2", "3", "4", "5", "6", "7"],
+            "labels": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+          },
+          "start": { "description": "开始时间 HH:MM", "type": "string", "default": "08:00" },
+          "end": { "description": "结束时间 HH:MM", "type": "string", "default": "18:00" }
+        }
+      }
+    },
+    "default": [
+      { "__template_key": "peak_window", "days": ["1", "2", "3", "4", "5"], "start": "08:00", "end": "18:00" }
+    ]
+  },
+  "whitelist_users": { "description": "用户白名单（QQ号）", "type": "list", "default": [] },
+  "whitelist_groups": { "description": "群白名单（群号）", "type": "list", "default": [] },
+  "allow_admins": { "description": "管理员始终放行", "type": "bool", "default": true },
+  "block_notice": {
+    "description": "拦截提示文案（仅暂停模式）",
+    "hint": "占位符：{time} {tz} {next_off} {next_peak} {start} {end}",
+    "type": "text",
+    "default": "🌙 当前为模型高峰时段，已暂停模型服务以节省费用。\n预计 {next_off} 恢复，届时可直接对话。"
+  },
+  "block_image": {
+    "description": "拦截提示图片（仅暂停模式）",
+    "hint": "本地路径或 http(s) 链接，留空则只发文字",
+    "type": "string",
+    "default": ""
+  },
+  "at_sender": { "description": "拦截提示中 @ 发送者（仅暂停模式）", "type": "bool", "default": false },
+  "notify_targets": {
+    "description": "提醒目标",
+    "hint": "支持：平台:类型:ID（如 aiocqhttp:GroupMessage:123）、group:群号、private:QQ号",
+    "type": "list",
+    "default": []
+  },
+  "notify_on_enter": { "description": "进入高峰时通知", "type": "bool", "default": true },
+  "notify_on_exit": { "description": "离开高峰时通知", "type": "bool", "default": true },
+  "enter_notice": {
+    "description": "进入高峰通知文案",
+    "type": "text",
+    "default": "🔔 已进入模型高峰时段，模型服务已暂停。\n预计 {next_off} 恢复。"
+  },
+  "exit_notice": {
+    "description": "离开高峰通知文案",
+    "type": "text",
+    "default": "✅ 已离开模型高峰时段，模型服务已恢复。\n下一次高峰：{next_peak}"
+  }
+}
