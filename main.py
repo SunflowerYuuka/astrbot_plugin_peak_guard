@@ -363,8 +363,10 @@ class PeakGuard(Star):
         yield event.plain_result(f"✅ 已重载，当前解析到 {len(self._windows)} 条高峰时段")
 
     # ---------- 调度与通知 ----------
-    @filter.on_astrbot_loaded()
-    async def on_astrbot_loaded(self):
+    async def initialize(self):
+        self._start_scheduler()
+
+    def _start_scheduler(self) -> None:
         if self._scheduler_task is None or self._scheduler_task.done():
             self._last_peak = self._is_peak_now()
             self._scheduler_task = asyncio.create_task(self._scheduler_loop())
