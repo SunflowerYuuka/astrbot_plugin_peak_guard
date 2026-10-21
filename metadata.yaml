@@ -1,6 +1,6 @@
 name: astrbot_plugin_peak_guard
 display_name: 峰谷守卫
-desc: 按模型供应商峰谷计费，在高峰时段自动暂停默认模型对话或切换到备用模型（白名单除外），空闲时段自动恢复；支持供应商过滤、时段/星期/时区/文案/图片/提醒目标配置。
+desc: 峰谷计费省钱：高峰时段自动暂停对话或切换备用模型，空闲自动恢复；支持白名单、供应商过滤与定时通知。
 version: "0.2.1"
-author: PeakGuard
+author: SunflowerYuuka
 repo: "https://github.com/SunflowerYuuka/astrbot_plugin_peak_guard"
