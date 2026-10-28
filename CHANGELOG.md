@@ -1,7 +1,12 @@
 # 更新日志
 
+## 0.2.3
+
+- 新增插件图标 `logo.png`（AstrBot 插件 Logo 约定文件名），图标由即梦 AI 生成。
+
 ## 0.2.2
 
+- 新增插件 Logo（`logo.png`，256x256）。
 - 元数据补充 `short_desc` 与 `tags`。
 - 声明本插件由 AI 制作。
 - 精简插件简介，作者改为 SunflowerYuuka。
