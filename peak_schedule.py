@@ -124,19 +124,42 @@ def _combine(now: datetime, day, minutes: int) -> datetime:
 def next_transition(
     now: datetime, windows: list[PeakWindow], horizon_days: int = 15
 ) -> datetime | None:
+    """返回下一次「高峰状态真正翻转」的时刻。
+
+    仅看边界不够：重叠时段（如 08:00-18:00 与 16:00-20:00）在 18:00
+    并不会离开高峰。这里逐个检查边界时刻的实际状态，返回第一个与当前不同的。
+    """
+    current = is_peak(now, windows)
     base_date = now.date() - timedelta(days=1)
-    candidates: list[datetime] = []
+    candidates: set[datetime] = set()
     for win in windows:
-        for offset in range(horizon_days + 1):
+        for offset in range(horizon_days + 2):
             day = base_date + timedelta(days=offset)
             if day.isoweekday() not in win.days:
                 continue
             if win.start_min == win.end_min:
-                candidates.append(_combine(now, day, 0))
-                candidates.append(_combine(now, day + timedelta(days=1), 0))
+                candidates.add(_combine(now, day, 0))
+                candidates.add(_combine(now, day + timedelta(days=1), 0))
                 continue
-            candidates.append(_combine(now, day, win.start_min))
+            candidates.add(_combine(now, day, win.start_min))
             end_day = day + timedelta(days=1) if win.start_min > win.end_min else day
-            candidates.append(_combine(now, end_day, win.end_min))
-    future = [c for c in candidates if c > now]
-    return min(future) if future else None
+            candidates.add(_combine(now, end_day, win.end_min))
+    for candidate in sorted(c for c in candidates if c > now):
+        if is_peak(candidate, windows) != current:
+            return candidate
+    return None
+
+
+def next_boundaries(
+    now: datetime, windows: list[PeakWindow], horizon_days: int = 15
+) -> tuple[datetime | None, datetime | None]:
+    """返回 (下一次离开高峰, 下一次进入高峰)。
+
+    当前不在高峰时，下一次离开高峰为 None。
+    """
+    nxt = next_transition(now, windows, horizon_days)
+    if nxt is None:
+        return None, None
+    if is_peak(now, windows):
+        return nxt, next_transition(nxt + timedelta(seconds=1), windows, horizon_days)
+    return None, nxt

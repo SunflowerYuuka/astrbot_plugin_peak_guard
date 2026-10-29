@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
+from astrbot.api.provider import Provider
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.core.config.astrbot_config import AstrBotConfig
 
@@ -16,14 +17,23 @@ from .config_defaults import (
     get_notice,
     get_peak_action,
     get_str,
+    get_transition_notice,
     get_windows_raw,
 )
 from .data_store import DataStore
-from .notifier import Target, classify_image, format_dt, parse_target, render_text
+from .notifier import (
+    Target,
+    classify_image,
+    format_dt,
+    parse_target,
+    render_text,
+    should_notify,
+)
 from .peak_schedule import (
     PeakWindow,
     active_window,
     is_peak,
+    next_boundaries,
     next_transition,
     parse_windows,
 )
@@ -34,9 +44,9 @@ _PLUGIN_NAME = "astrbot_plugin_peak_guard"
 
 
 class PeakGuard(Star):
-    def __init__(self, context: Context, config: AstrBotConfig):
+    def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
-        self.config = config
+        self.config = config if config is not None else {}
         data_dir = StarTools.get_data_dir(_PLUGIN_NAME)
         self.store = DataStore(data_dir / "state.json")
         self.store.load()
@@ -45,6 +55,7 @@ class PeakGuard(Star):
         self._last_peak: bool | None = None
         self._windows: list[PeakWindow] = []
         self._targets: list[Target] = []
+        self._warned_providers: set[str] = set()
         self._reload()
 
     # ---------- 配置与状态 ----------
@@ -74,7 +85,7 @@ class PeakGuard(Star):
         self.gate_when_provider_unknown = get_bool(
             self.config, "gate_when_provider_unknown", True
         )
-        self._warned_providers: set[str] = set()
+        self._warned_providers = set()
         self._targets = []
         for raw in get_list(self.config, "notify_targets"):
             target = parse_target(str(raw))
@@ -97,24 +108,26 @@ class PeakGuard(Star):
     def _wake_scheduler(self) -> None:
         self._wake.set()
 
-    def _next_boundaries(self, now: datetime) -> tuple[datetime | None, datetime | None]:
-        nxt = next_transition(now, self._windows)
-        if nxt is None:
-            return None, None
-        if is_peak(now, self._windows):
-            return nxt, next_transition(nxt + timedelta(seconds=1), self._windows)
-        return nxt, nxt
+    def _boundary_texts(self, now: datetime) -> tuple[str, str]:
+        override = self.store.override
+        if override == "on":
+            return "手动恢复时（/峰谷强制 auto）", "手动恢复后按计划"
+        if override == "off":
+            return "当前未拦截", "手动恢复后按计划"
+        next_off, next_peak = next_boundaries(now, self._windows)
+        return format_dt(next_off), format_dt(next_peak)
 
     def _build_context(self, now: datetime) -> dict[str, str]:
-        next_off, next_peak = self._next_boundaries(now)
+        next_off, next_peak = self._boundary_texts(now)
         win = active_window(now, self._windows)
         return {
             "time": now.strftime("%Y-%m-%d %H:%M"),
             "tz": self.tz_name,
-            "next_off": format_dt(next_off),
-            "next_peak": format_dt(next_peak),
+            "next_off": next_off,
+            "next_peak": next_peak,
             "start": win.raw_start if win else "未知",
             "end": win.raw_end if win else "未知",
+            "action": "切换模型" if self.peak_action == "switch" else "暂停对话",
         }
 
     def _notice_chain(
@@ -212,31 +225,37 @@ class PeakGuard(Star):
         self._warned_providers.add(key)
         logger.warning(f"[PeakGuard] {message}")
 
-    async def _apply_switch(self, event: AstrMessageEvent) -> None:
+    async def _apply_switch(self, event: AstrMessageEvent) -> bool:
         target = self.peak_provider_id
         if not target:
             self._warn_once(
                 "<empty>",
-                "高峰动作设置为 switch，但未配置 peak_provider_id，已跳过切换",
+                "高峰动作设置为 switch，但未配置 peak_provider_id，将改为暂停对话",
             )
-            return
+            return False
         provider = None
         try:
             provider = self.context.get_provider_by_id(target)
         except Exception as exc:  # noqa: BLE001
             logger.debug(f"[PeakGuard] 查询高峰 Provider {target!r} 失败：{exc}")
         if provider is None:
-            self._warn_once(target, f"高峰 Provider {target!r} 不存在，已跳过切换")
-            return
+            self._warn_once(target, f"高峰 Provider {target!r} 不存在，将改为暂停对话")
+            return False
+        if not isinstance(provider, Provider):
+            self._warn_once(
+                target,
+                f"高峰 Provider {target!r} 不是对话模型（{type(provider).__name__}），将改为暂停对话",
+            )
+            return False
         event.set_extra("selected_provider", target)
+        return True
 
     # ---------- 拦截 ----------
-    @filter.on_waiting_llm_request()
-    async def on_waiting_llm(self, event: AstrMessageEvent):
+    async def _should_gate(self, event: AstrMessageEvent) -> bool:
         if not get_bool(self.config, "enabled", True):
-            return
+            return False
         if not self._is_peak_now():
-            return
+            return False
         group_id = event.get_group_id()
         if check_whitelist(
             event.get_sender_id(),
@@ -246,23 +265,27 @@ class PeakGuard(Star):
             is_admin=event.is_admin(),
             allow_admins=self.allow_admins,
         ):
-            return
+            return False
         provider_id, provider = await self._current_provider(event)
-        if not self._provider_affected(provider_id, provider):
-            return
-        if self.peak_action == "switch":
-            await self._apply_switch(event)
-            return
+        return self._provider_affected(provider_id, provider)
+
+    async def _pause(self, event: AstrMessageEvent) -> None:
         try:
-            event.should_call_llm(False)
-            text = render_text(get_notice(self.config, "block_notice"), self._build_context(self._now()))
+            text = render_text(
+                get_notice(self.config, "block_notice"),
+                self._build_context(self._now()),
+            )
             at_id = None
             at_name = ""
-            if self.at_sender and group_id:
+            if self.at_sender and event.get_group_id():
                 at_id = event.get_sender_id()
                 at_name = event.get_sender_name()
             try:
-                await event.send(self._notice_chain(text, at_sender_id=at_id, at_sender_name=at_name))
+                await event.send(
+                    self._notice_chain(
+                        text, at_sender_id=at_id, at_sender_name=at_name
+                    )
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(f"[PeakGuard] 发送拦截提示失败：{exc}")
             try:
@@ -276,6 +299,27 @@ class PeakGuard(Star):
         finally:
             event.stop_event()
 
+    @filter.on_waiting_llm_request()
+    async def on_waiting_llm(self, event: AstrMessageEvent):
+        """switch 必须在 build_main_agent 之前设置 selected_provider。"""
+        if self.peak_action != "switch":
+            return
+        if not await self._should_gate(event):
+            return
+        await self._apply_switch(event)
+
+    @filter.on_llm_request()
+    async def on_llm_request(self, event: AstrMessageEvent, _request=None):
+        """pause 使用 OnLLMRequestEvent：该钩子自 4.20.0 起即可中止请求。"""
+        if self.peak_action == "switch":
+            if not await self._should_gate(event):
+                return
+            if await self._apply_switch(event):
+                return
+        elif not await self._should_gate(event):
+            return
+        await self._pause(event)
+
     # ---------- 指令 ----------
     def _deny(self, event: AstrMessageEvent):
         return event.plain_result("❌ 该指令仅限管理员使用")
@@ -287,7 +331,7 @@ class PeakGuard(Star):
             yield self._deny(event)
             return
         now = self._now()
-        next_off, next_peak = self._next_boundaries(now)
+        next_off_text, next_peak_text = self._boundary_texts(now)
         enabled = get_bool(self.config, "enabled", True)
         override = self.store.override
         peak = self._is_peak_now()
@@ -307,8 +351,8 @@ class PeakGuard(Star):
         affected_label = "全部" if "*" in affected else (affected or "不拦截")
         lines.append(f"受影响供应商：{affected_label}")
         if peak:
-            lines.append(f"下一次离开高峰：{format_dt(next_off)}")
-        lines.append(f"下一次进入高峰：{format_dt(next_peak)}")
+            lines.append(f"下一次离开高峰：{next_off_text}")
+        lines.append(f"下一次进入高峰：{next_peak_text}")
         lines.append(f"提醒目标：静态 {len(self._targets)} 个 / 订阅 {len(self.store.subscriptions)} 个")
         yield event.plain_result("\n".join(lines))
 
@@ -320,7 +364,7 @@ class PeakGuard(Star):
             return
         parts = (event.message_str or "").split()
         mode = parts[1].lower() if len(parts) > 1 else ""
-        if mode not in ("on", "off", "auto"):
+        if len(parts) != 2 or mode not in ("on", "off", "auto"):
             yield event.plain_result("用法：/峰谷强制 on（强制暂停）| off（强制恢复）| auto（跟随时段）")
             return
         self.store.set_override(mode)
@@ -392,7 +436,14 @@ class PeakGuard(Star):
                     self._last_peak = current
                     continue
                 if current != self._last_peak:
-                    await self._send_transition_notice(current)
+                    if should_notify(
+                        get_bool(self.config, "enabled", True),
+                        current,
+                        self._last_peak,
+                        get_bool(self.config, "notify_on_enter", True),
+                        get_bool(self.config, "notify_on_exit", True),
+                    ):
+                        await self._send_transition_notice(current)
                     self._last_peak = current
             except asyncio.CancelledError:
                 raise
@@ -441,23 +492,34 @@ class PeakGuard(Star):
                 logger.warning(f"[PeakGuard] 通知发送失败 {target.kind}:{target.value}：{exc}")
 
     async def _send_transition_notice(self, now_peak: bool) -> None:
+        if not get_bool(self.config, "enabled", True):
+            return
         if now_peak:
             if not get_bool(self.config, "notify_on_enter", True):
                 return
-            text = render_text(get_notice(self.config, "enter_notice"), self._build_context(self._now()))
+            text = render_text(
+                get_transition_notice(self.config, "enter_notice", self.peak_action),
+                self._build_context(self._now()),
+            )
         else:
             if not get_bool(self.config, "notify_on_exit", True):
                 return
-            text = render_text(get_notice(self.config, "exit_notice"), self._build_context(self._now()))
+            text = render_text(
+                get_transition_notice(self.config, "exit_notice", self.peak_action),
+                self._build_context(self._now()),
+            )
         logger.info(f"[PeakGuard] 状态切换 -> {'高峰' if now_peak else '空闲'}，发送通知")
         await self._broadcast(text)
 
     # ---------- 生命周期 ----------
     async def terminate(self):
-        if self._scheduler_task and not self._scheduler_task.done():
-            self._scheduler_task.cancel()
-            try:
-                await self._scheduler_task
-            except asyncio.CancelledError:
-                pass
+        try:
+            if self._scheduler_task and not self._scheduler_task.done():
+                self._scheduler_task.cancel()
+                try:
+                    await self._scheduler_task
+                except asyncio.CancelledError:
+                    pass
+        finally:
+            self._scheduler_task = None
         logger.info("[PeakGuard] 已卸载")

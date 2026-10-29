@@ -52,3 +52,15 @@ def format_dt(value: datetime | None) -> str:
     if value is None:
         return "未知"
     return value.strftime("%Y-%m-%d %H:%M")
+
+
+def should_notify(
+    enabled: bool,
+    now_peak: bool,
+    last_peak: bool | None,
+    notify_on_enter: bool,
+    notify_on_exit: bool,
+) -> bool:
+    if not enabled or last_peak is None or now_peak == last_peak:
+        return False
+    return bool(notify_on_enter if now_peak else notify_on_exit)

@@ -1,7 +1,14 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from notifier import Target, classify_image, format_dt, parse_target, render_text
+from notifier import (
+    Target,
+    classify_image,
+    format_dt,
+    parse_target,
+    render_text,
+    should_notify,
+)
 
 
 def test_parse_target_umo():
@@ -46,3 +53,13 @@ def test_format_dt():
     assert format_dt(None) == "未知"
     tz = ZoneInfo("Asia/Shanghai")
     assert format_dt(datetime(2026, 10, 20, 18, 0, tzinfo=tz)) == "2026-10-20 18:00"
+
+
+def test_should_notify_respects_enabled_and_flags():
+    assert should_notify(True, True, False, True, True) is True
+    assert should_notify(True, False, True, True, True) is True
+    assert should_notify(False, True, False, True, True) is False
+    assert should_notify(True, True, True, True, True) is False
+    assert should_notify(True, True, None, True, True) is False
+    assert should_notify(True, True, False, False, True) is False
+    assert should_notify(True, False, True, True, False) is False

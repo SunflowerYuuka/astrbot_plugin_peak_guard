@@ -5,6 +5,7 @@ from peak_schedule import (
     PeakWindow,
     active_window,
     is_peak,
+    next_boundaries,
     next_transition,
     normalize_days,
     parse_hhmm,
@@ -137,6 +138,35 @@ def test_next_transition_full_day_midnight():
     assert next_transition(dt(20, 9, 0), wins) == dt(21, 0, 0)
     # 周一 23:00 -> 全天窗口在周二 00:00 开始
     assert next_transition(dt(19, 23, 0), wins) == dt(20, 0, 0)
+
+
+def test_next_transition_skips_overlapping_boundary():
+    wins = parse_windows(
+        [
+            {"days": ["2"], "start": "08:00", "end": "18:00"},
+            {"days": ["2"], "start": "16:00", "end": "20:00"},
+        ]
+    )
+    # 17:00 处于重叠区，18:00 仍是高峰，真正离开是 20:00
+    assert is_peak(dt(20, 18, 1), wins) is True
+    assert next_transition(dt(20, 17, 0), wins) == dt(20, 20, 0)
+    assert next_transition(dt(20, 18, 30), wins) == dt(20, 20, 0)
+
+
+def test_next_boundaries_inside_and_outside_peak():
+    wins = parse_windows([{"days": ["2"], "start": "08:00", "end": "18:00"}])
+    assert next_boundaries(dt(20, 7, 0), wins) == (None, dt(20, 8, 0))
+    assert next_boundaries(dt(20, 9, 0), wins) == (dt(20, 18, 0), dt(27, 8, 0))
+
+
+def test_next_boundaries_overlap():
+    wins = parse_windows(
+        [
+            {"days": ["2"], "start": "08:00", "end": "18:00"},
+            {"days": ["2"], "start": "16:00", "end": "20:00"},
+        ]
+    )
+    assert next_boundaries(dt(20, 17, 0), wins) == (dt(20, 20, 0), dt(27, 8, 0))
 
 
 def test_parse_windows_on_skip_called_for_invalid():

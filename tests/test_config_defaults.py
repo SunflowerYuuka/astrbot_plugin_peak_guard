@@ -5,6 +5,7 @@ from config_defaults import (
     get_notice,
     get_peak_action,
     get_str,
+    get_transition_notice,
     get_windows_raw,
 )
 
@@ -47,3 +48,16 @@ def test_get_peak_action_invalid_falls_back():
     assert get_peak_action({"peak_action": "bogus"}) == "pause"
     assert get_peak_action({"peak_action": None}) == "pause"
     assert get_peak_action({"peak_action": 1}) == "pause"
+
+
+def test_get_transition_notice_switch_replaces_legacy_pause_text():
+    legacy = "🔔 已进入模型高峰时段，模型服务已暂停。\n预计 {next_off} 恢复。"
+    assert get_transition_notice({"enter_notice": legacy}, "enter_notice", "switch") == DEFAULTS["enter_notice"]
+    assert get_transition_notice({"enter_notice": legacy}, "enter_notice", "pause") == legacy
+    assert get_transition_notice({}, "enter_notice", "switch") == DEFAULTS["enter_notice"]
+
+
+def test_get_transition_notice_keeps_custom_text():
+    custom = "自定义 {action}"
+    assert get_transition_notice({"enter_notice": custom}, "enter_notice", "switch") == custom
+    assert get_transition_notice({}, "exit_notice", "switch") == DEFAULTS["exit_notice"]

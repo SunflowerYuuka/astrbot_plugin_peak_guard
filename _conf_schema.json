@@ -88,8 +88,9 @@
   "notify_on_exit": { "description": "离开高峰时通知", "type": "bool", "default": true },
   "enter_notice": {
     "description": "进入高峰通知文案",
+    "hint": "占位符：{time} {tz} {next_off} {next_peak} {start} {end} {action}",
     "type": "text",
-    "default": "🔔 已进入模型高峰时段，模型服务已暂停。\n预计 {next_off} 恢复。"
+    "default": "🔔 已进入模型高峰时段，当前动作：{action}。\n预计 {next_off} 恢复。"
   },
   "exit_notice": {
     "description": "离开高峰通知文案",

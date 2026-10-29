@@ -61,3 +61,5 @@ def test_non_utf8_file_resets(tmp_path):
     store.load()
     assert store.subscriptions == []
     assert store.override == "auto"
+
+
