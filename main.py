@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -41,14 +42,15 @@ from .provider_match import is_affected
 from .whitelist import check_whitelist
 
 _PLUGIN_NAME = "astrbot_plugin_peak_guard"
+_BLOCK_NOTICE_COOLDOWN = 60.0
 
 
 class PeakGuard(Star):
     def __init__(self, context: Context, config: AstrBotConfig | None = None):
         super().__init__(context)
         self.config = config if config is not None else {}
-        data_dir = StarTools.get_data_dir(_PLUGIN_NAME)
-        self.store = DataStore(data_dir / "state.json")
+        self._data_dir = StarTools.get_data_dir(_PLUGIN_NAME)
+        self.store = DataStore(self._data_dir / "state.json")
         self.store.load()
         self._scheduler_task: asyncio.Task | None = None
         self._wake = asyncio.Event()
@@ -56,6 +58,7 @@ class PeakGuard(Star):
         self._windows: list[PeakWindow] = []
         self._targets: list[Target] = []
         self._warned_providers: set[str] = set()
+        self._block_notice_at: dict[str, float] = {}
         self._reload()
 
     # ---------- 配置与状态 ----------
@@ -85,7 +88,11 @@ class PeakGuard(Star):
         self.gate_when_provider_unknown = get_bool(
             self.config, "gate_when_provider_unknown", True
         )
+        self.gate_plugin_requests = get_bool(
+            self.config, "gate_plugin_requests", False
+        )
         self._warned_providers = set()
+        self._block_notice_at.clear()
         self._targets = []
         for raw in get_list(self.config, "notify_targets"):
             target = parse_target(str(raw))
@@ -148,9 +155,12 @@ class PeakGuard(Star):
         if image_kind == "url":
             return MessageChain().url_image(self.block_image)
         if image_kind == "file":
-            if Path(self.block_image).exists():
-                return MessageChain().file_image(self.block_image)
-            logger.warning(f"[PeakGuard] 提示图片不存在：{self.block_image}")
+            path = Path(self.block_image)
+            if not path.is_absolute():
+                path = self._data_dir / path
+            if path.exists():
+                return MessageChain().file_image(str(path))
+            logger.warning(f"[PeakGuard] 提示图片不存在：{path}")
         return None
 
     # ---------- 供应商识别 ----------
@@ -256,6 +266,11 @@ class PeakGuard(Star):
             return False
         if not self._is_peak_now():
             return False
+        if (
+            not self.gate_plugin_requests
+            and event.get_extra("provider_request") is not None
+        ):
+            return False
         group_id = event.get_group_id()
         if check_whitelist(
             event.get_sender_id(),
@@ -269,31 +284,42 @@ class PeakGuard(Star):
         provider_id, provider = await self._current_provider(event)
         return self._provider_affected(provider_id, provider)
 
+    def _notice_allowed(self, session: str) -> bool:
+        now = time.monotonic()
+        last = self._block_notice_at.get(session)
+        if last is not None and now - last < _BLOCK_NOTICE_COOLDOWN:
+            return False
+        if len(self._block_notice_at) > 512:
+            self._block_notice_at.clear()
+        self._block_notice_at[session] = now
+        return True
+
     async def _pause(self, event: AstrMessageEvent) -> None:
         try:
-            text = render_text(
-                get_notice(self.config, "block_notice"),
-                self._build_context(self._now()),
-            )
-            at_id = None
-            at_name = ""
-            if self.at_sender and event.get_group_id():
-                at_id = event.get_sender_id()
-                at_name = event.get_sender_name()
-            try:
-                await event.send(
-                    self._notice_chain(
-                        text, at_sender_id=at_id, at_sender_name=at_name
-                    )
+            if self._notice_allowed(event.unified_msg_origin):
+                text = render_text(
+                    get_notice(self.config, "block_notice"),
+                    self._build_context(self._now()),
                 )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"[PeakGuard] 发送拦截提示失败：{exc}")
-            try:
-                image_chain = self._image_chain()
-                if image_chain is not None:
-                    await event.send(image_chain)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(f"[PeakGuard] 发送拦截提示图片失败：{exc}")
+                at_id = None
+                at_name = ""
+                if self.at_sender and event.get_group_id():
+                    at_id = event.get_sender_id()
+                    at_name = event.get_sender_name()
+                try:
+                    await event.send(
+                        self._notice_chain(
+                            text, at_sender_id=at_id, at_sender_name=at_name
+                        )
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"[PeakGuard] 发送拦截提示失败：{exc}")
+                try:
+                    image_chain = self._image_chain()
+                    if image_chain is not None:
+                        await event.send(image_chain)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"[PeakGuard] 发送拦截提示图片失败：{exc}")
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"[PeakGuard] 构建或发送拦截提示失败：{exc}")
         finally:

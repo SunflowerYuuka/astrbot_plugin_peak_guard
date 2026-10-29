@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 _VALID_OVERRIDE = {"auto", "on", "off"}
@@ -67,6 +68,8 @@ class DataStore:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"subscriptions": self._subscriptions, "override": self._override}
-        self.path.write_text(
+        tmp = self.path.with_name(self.path.name + ".tmp")
+        tmp.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+        os.replace(tmp, self.path)

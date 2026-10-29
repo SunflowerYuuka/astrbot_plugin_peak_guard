@@ -8,6 +8,7 @@ DEFAULTS = {
     "peak_provider_id": "",
     "affected_providers": "*",
     "gate_when_provider_unknown": True,
+    "gate_plugin_requests": False,
     "peak_windows": [
         {"days": ["1", "2", "3", "4", "5"], "start": "08:00", "end": "18:00"}
     ],

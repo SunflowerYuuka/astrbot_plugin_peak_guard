@@ -37,6 +37,12 @@
     "type": "bool",
     "default": true
   },
+  "gate_plugin_requests": {
+    "description": "拦截其他插件发起的 LLM 请求",
+    "hint": "默认关闭；开启后其他插件主动调用 LLM 时也会被暂停/切换",
+    "type": "bool",
+    "default": false
+  },
   "peak_windows": {
     "description": "高峰时段（命中则执行高峰动作）",
     "hint": "支持跨夜，如 22:00-06:00；开始=结束视为全天。指令以唤醒前缀开头，不受影响。",

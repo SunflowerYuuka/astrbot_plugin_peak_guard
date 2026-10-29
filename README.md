@@ -18,7 +18,7 @@
 
 命中高峰、不在白名单、且当前供应商命中 `affected_providers` 时才处理。
 只拦截/切换**对话/默认 LLM 请求**，其他插件指令完全不受影响；其他插件主动发起的
-`request_llm` 不受影响。
+`request_llm` 默认不受影响，可通过 `gate_plugin_requests` 开启。
 
 ## 安装
 
@@ -35,6 +35,7 @@
 | `peak_provider_id` | `switch` 时使用的模型提供商 |
 | `affected_providers` | 受影响的供应商匹配词（逗号分隔，匹配 Provider 的 ID/模型名/类型；`*`=全部；留空=不处理） |
 | `gate_when_provider_unknown` | 识别不到供应商时是否仍处理（默认是） |
+| `gate_plugin_requests` | 是否拦截其他插件发起的 LLM 请求（默认否） |
 | `peak_windows` | 高峰时段列表：`days`(周一~周日) + `start` + `end`；支持跨夜（22:00-06:00）；`start==end` 视为全天 |
 | `whitelist_users` / `whitelist_groups` | 白名单 QQ 号 / 群号 |
 | `allow_admins` | 管理员是否始终放行 |
@@ -75,6 +76,7 @@
   避免继续使用高峰贵模型；运行中修复后执行 `/峰谷重载` 会重置该提示。
 - `affected_providers` 留空表示不拦截也不切换；默认 `*` 与旧版行为一致（处理全部供应商）。
   例如只对 DeepSeek 生效可填 `deepseek`。
+- 拦截提示按会话 60 秒冷却：冷却期内仍会停止请求，但不会重复发送提示。
 - 关闭 `enabled` 后不再拦截，也不会发送进入/离开高峰通知。
 - 手动覆盖（`/峰谷强制 on|off`）期间，通知里的 `{next_off}`/`{next_peak}` 会显示为
   「手动恢复时」等提示，而不是错误的计划时间。

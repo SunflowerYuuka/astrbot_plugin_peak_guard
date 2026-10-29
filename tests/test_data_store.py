@@ -63,3 +63,12 @@ def test_non_utf8_file_resets(tmp_path):
     assert store.override == "auto"
 
 
+def test_save_is_atomic_and_leaves_no_temp_file(tmp_path):
+    path = tmp_path / "state.json"
+    store = DataStore(path)
+    store.load()
+    store.subscribe("aiocqhttp:GroupMessage:7")
+    assert json.loads(path.read_text(encoding="utf-8"))["subscriptions"] == [
+        "aiocqhttp:GroupMessage:7"
+    ]
+    assert not (tmp_path / "state.json.tmp").exists()

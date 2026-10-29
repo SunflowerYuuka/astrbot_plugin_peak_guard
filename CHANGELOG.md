@@ -1,5 +1,11 @@
 # 更新日志
 
+## 0.2.5
+
+- 新增 `gate_plugin_requests`（默认关闭），用于拦截其他插件发起的 LLM 请求。
+- 拦截提示增加 60 秒会话冷却。
+- `state.json` 改为原子写入；`block_image` 相对路径基于插件数据目录。
+
 ## 0.2.4
 
 - 修复：pause 在 AstrBot < 4.26.1 上无法真正阻止请求（改用 `on_llm_request` + `stop_event()`），并声明 `astrbot_version: ">=4.20.0"`。

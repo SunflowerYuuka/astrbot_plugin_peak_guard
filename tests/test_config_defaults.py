@@ -61,3 +61,7 @@ def test_get_transition_notice_keeps_custom_text():
     custom = "自定义 {action}"
     assert get_transition_notice({"enter_notice": custom}, "enter_notice", "switch") == custom
     assert get_transition_notice({}, "exit_notice", "switch") == DEFAULTS["exit_notice"]
+
+
+def test_gate_plugin_requests_defaults_off():
+    assert DEFAULTS["gate_plugin_requests"] is False
